@@ -146,13 +146,10 @@ def main():
         )
 
         # SMTP_SSL opens an encrypted connection on port 465 — login and send
-        try:
-    		with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        		smtp.login(sender, app_password)
-        		smtp.send_message(email_msg)
-    		print("Email sent!")
-		except Exception as e:
-    		print(f"Email failed: {e}")
+    	with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        	smtp.login(sender, app_password)
+        	smtp.send_message(email_msg)
+    	print("Email sent!")
 
     # --- Update the database after emails are sent ---
     cursor = conn.cursor()
