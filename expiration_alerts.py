@@ -147,7 +147,9 @@ def main():
 
         # SMTP_SSL opens an encrypted connection on port 465 — login and send
         try:
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+                smtp.ehlo()
+                smtp.starttls()
                 smtp.login(sender, app_password)
                 smtp.send_message(email_msg)
             print("Email sent!")
