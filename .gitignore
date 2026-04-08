@@ -1,0 +1,4 @@
+.env
+sql_expiration_alerts.db
+lambda_package/
+expiration_alert.zip
