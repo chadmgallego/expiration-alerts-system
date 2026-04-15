@@ -1,6 +1,6 @@
 # 📄 Document Expiration Alert System
 
-An automated document expiration monitoring pipeline built for Student Mobilization, Inc. managing visa, passport, and residency documentation across multiple households. The system queries a cloud-hosted PostgreSQL database, applies a tiered alert logic, and delivers email notifications to household contacts — running on a cron schedule with zero manual intervention.
+An automated document expiration monitoring pipeline built for a field staff organization managing visa, passport, and residency documentation across multiple households. The system queries a cloud-hosted PostgreSQL database, applies a tiered alert logic, and delivers email notifications to household contacts — running on a cron schedule with zero manual intervention.
 
 ---
 
@@ -175,6 +175,10 @@ Add:
 0 */6 * * * cd "/path/to/expiration-alerts-system" && /usr/bin/python3 src/expiration_alerts.py
 ```
 
+**4. Adding new households:**
+
+New households are onboarded via a Google Form collecting each family member's name and document expiration dates. After a form submission, use [`sql/household_intake_template.sql`](sql/household_intake_template.sql) as a reusable insert template to load the data into PostgreSQL. The template follows a three-step order — `HOUSEHOLD_CONTACTS` → `STAFF_AND_DEP` → `DOCUMENTS` — and includes a verification query to confirm all inserts before closing out the submission.
+
 ---
 
 ## Limitations & Future Work
@@ -183,9 +187,11 @@ Add:
 - Requires local machine to be awake — cron runs on laptop, not a persistent cloud server
 - Gmail SMTP only — no support for other email providers
 - No web UI for managing documents — all data entry done directly in the database
+- Google Form submissions require manual SQL inserts — no automated ingestion pipeline
 
 **Planned improvements:**
 - Migrate cron scheduling to a cloud-native solution (AWS EventBridge + Lambda or equivalent) for fully serverless execution
+- Automate Google Form → PostgreSQL ingestion using Google Apps Script or a webhook
 - Add a lightweight admin UI for non-technical staff to manage document records without direct database access
 - Expand notification channels (SMS via Twilio, Slack alerts)
 - Add logging and alerting for failed email sends
@@ -197,12 +203,13 @@ Add:
 ```
 expiration-alerts-system/
 ├── sql/
-│   ├── schema.sql               # PostgreSQL table definitions
-│   └── alert_query.sql          # Tiered alert WHERE clause
+│   ├── schema.sql                     # PostgreSQL table definitions
+│   ├── alert_query.sql                # Tiered alert WHERE clause
+│   └── household_intake_template.sql  # Reusable insert template for new family submissions
 ├── src/
-│   └── expiration_alerts.py     # Main pipeline script
-├── requirements.txt             # Python dependencies
-├── .gitignore                   # Excludes .env, database files, build artifacts
+│   └── expiration_alerts.py           # Main pipeline script
+├── requirements.txt                   # Python dependencies
+├── .gitignore                         # Excludes .env, database files, build artifacts
 └── README.md
 ```
 
