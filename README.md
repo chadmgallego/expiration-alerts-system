@@ -22,10 +22,11 @@ An automated document expiration monitoring pipeline built for a field staff org
 
 This project replaces a manual document tracking process with a fully automated alert pipeline. A Python script connects to a PostgreSQL database hosted on Supabase, identifies documents entering expiration windows, and sends grouped email alerts to household contacts — with smart deduplication logic to prevent alert fatigue.
 
-The system enforces three alert tiers:
+The system enforces four alert tiers:
 
 | Alert Tier | Window | Frequency |
 |---|---|---|
+| Expired | Past expiration date | Weekly (7-day cooldown) |
 | 90-day | 61–90 days to expiration | Once |
 | 60-day | 31–60 days to expiration | Once |
 | 30-day (URGENT) | 0–30 days to expiration | Weekly (7-day cooldown) |
@@ -42,8 +43,9 @@ This system was built to eliminate manual tracking overhead and ensure no docume
 
 - **Tiered alerts** give households 90, 60, and 30 days of advance notice — enough lead time to initiate renewal processes in high-bureaucracy environments
 - **Weekly reminders** in the 30-day window keep urgent documents visible without requiring manual follow-up
+- **Expired document tracking** flags and re-alerts on documents past their expiration date on a weekly cadence until renewed
 - **Grouped emails** consolidate all expiring documents per household into a single notification, reducing inbox noise
-- **URGENT subject line flagging** surfaces critical documents at a glance without opening the email
+- **Priority subject lines** escalate from standard → URGENT → ACTION REQUIRED based on the most critical document in each email batch
 
 ---
 
@@ -70,19 +72,20 @@ cron (every 6 hours)
       ▼
 src/expiration_alerts.py
   ├── psycopg2 → Supabase PostgreSQL
-  │     └── Tiered WHERE clause filters qualifying documents
+  │     └── Four-tier WHERE clause filters qualifying documents
   │
   ├── pandas
-  │     ├── should_send() — applies alert tier logic row-by-row
-  │     ├── Builds formatted document lines per recipient
+  │     ├── should_send() — returns 'expired', 30, 60, or 90
+  │     ├── build_line() — formats document lines (expired vs. days remaining)
   │     └── Groups documents by household email
   │
   ├── smtplib (Gmail SMTP, port 465)
   │     └── Sends one email per household contact
-  │     └── URGENT subject line if any doc <= 30 days
+  │     └── Subject: ACTION REQUIRED > URGENT > standard
   │
   └── psycopg2 (UPDATE)
-        └── Stamps last_alert_sent and last_alert_type per document
+        ├── Expired docs: sets expired = TRUE, stamps last_alert_sent
+        └── Active docs: stamps last_alert_sent and last_alert_type
 ```
 
 ---
@@ -93,9 +96,18 @@ The SQL `WHERE` clause gates which documents qualify for alerts on each run:
 
 ```sql
 WHERE 
-    -- 30-day window: weekly, enforced by 7-day cooldown on last_alert_sent
+    -- Expired window: past expiration date, alert every 7 days
     (
-        (d.expiration_date - CURRENT_DATE) <= 30
+        d.expiration_date < CURRENT_DATE
+        AND (
+            d.last_alert_sent IS NULL
+            OR d.last_alert_sent <= CURRENT_DATE - INTERVAL '7 days'
+        )
+    )
+    -- 30-day window: weekly, enforced by 7-day cooldown on last_alert_sent
+    OR (
+        (d.expiration_date - CURRENT_DATE) >= 0
+        AND (d.expiration_date - CURRENT_DATE) <= 30
         AND (
             d.last_alert_sent IS NULL
             OR d.last_alert_sent <= CURRENT_DATE - INTERVAL '7 days'
@@ -115,7 +127,7 @@ WHERE
     )
 ```
 
-After each successful send, the script updates `last_alert_sent` (date) and `last_alert_type` (30, 60, or 90) per document — preventing duplicate alerts across runs.
+After each successful send, the script updates `last_alert_sent`, `last_alert_type`, and `expired` per document — preventing duplicate alerts across runs.
 
 ---
 
@@ -140,7 +152,9 @@ CREATE TABLE DOCUMENTS (
     document_type TEXT,
     expiration_date DATE,
     last_alert_sent DATE,
-    last_alert_type INTEGER  -- stores 30, 60, or 90 depending on last alert tier sent
+    last_alert_type INTEGER,        -- stores 30, 60, or 90 depending on last alert tier sent
+    expired BOOLEAN DEFAULT FALSE,  -- set to TRUE when expiration_date < CURRENT_DATE
+    CONSTRAINT unique_person_document UNIQUE (personal_id, document_type)
 );
 ```
 
@@ -177,7 +191,7 @@ Add:
 
 **4. Adding new households:**
 
-New households are onboarded via a Google Form collecting each family member's name and document expiration dates. After a form submission, use [`sql/household_intake_template.sql`](sql/household_intake_template.sql) as a reusable insert template to load the data into PostgreSQL. The template follows a three-step order — `HOUSEHOLD_CONTACTS` → `STAFF_AND_DEP` → `DOCUMENTS` — and includes a verification query to confirm all inserts before closing out the submission.
+New households are onboarded via a Google Form collecting each family member's name and document expiration dates. After a form submission, use [`sql/household_intake_template.sql`](sql/household_intake_template.sql) as a reusable upsert template to load the data into PostgreSQL. The template follows a three-step order — `HOUSEHOLD_CONTACTS` → `STAFF_AND_DEP` → `DOCUMENTS` — includes deduplication checks to prevent duplicate records, and includes a verification query to confirm all inserts before closing out the submission.
 
 ---
 
@@ -204,8 +218,8 @@ New households are onboarded via a Google Form collecting each family member's n
 expiration-alerts-system/
 ├── sql/
 │   ├── schema.sql                     # PostgreSQL table definitions
-│   ├── alert_query.sql                # Tiered alert WHERE clause
-│   └── household_intake_template.sql  # Reusable insert template for new family submissions
+│   ├── alert_query.sql                # Four-tier alert WHERE clause
+│   └── household_intake_template.sql  # Reusable upsert template for new family submissions
 ├── src/
 │   └── expiration_alerts.py           # Main pipeline script
 ├── requirements.txt                   # Python dependencies
